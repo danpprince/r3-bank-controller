@@ -1,65 +1,104 @@
 int currentBank = 0;
 int bankArray[16];
 
-const int buttonBankLeft = 2;
-const int buttonBankRight = 3;
-const int ledPin = 4;
+#define DEBOUNCE_DELAY 50
 
-int bankLeftState = 0;
-int prevBankLeftState = 0;
-int bankRightState = 0;
-int prevBankRightState = 0;
+#define BUTTON_BANK_LEFT 2
+#define BUTTON_BANK_RIGHT 3
+#define LED_PIN 4
 
-void setup() {
+enum Direction {LEFT, RIGHT};
+
+class ButtonHandler
+{
+public:
+	unsigned long lastReadingTime;
+	int reading, prevReading, buttonState, prevButtonState, buttonPin, advanceDirection;
+	int* bankNumber;
+        Direction dir;
+
+	ButtonHandler (Direction d, int* b) { 
+		prevButtonState = buttonState = LOW;
+		dir = d; 
+		bankNumber = b;
+		if (dir == LEFT)
+		{
+			buttonPin = BUTTON_BANK_LEFT;
+			advanceDirection = -1;
+		}
+		else if (dir == RIGHT)
+		{
+			buttonPin = BUTTON_BANK_RIGHT;
+			advanceDirection = 1;
+		}
+	}
+
+	void updateState()
+	{
+		reading = digitalRead(buttonPin);
+
+		// Reset the timer if the state changes
+		if (reading != prevReading)
+			// HEY! ints are 16 bit!
+			lastReadingTime = millis();
+
+		// If this state has lasted longer than the debounce delay parameter,
+		// actually count it as a reading
+		if ((millis() - lastReadingTime) > DEBOUNCE_DELAY)
+		{
+			if (reading != buttonState) 
+				buttonState = reading;
+
+			if (buttonState == HIGH && prevButtonState == LOW)
+				changeBank();
+
+			prevButtonState = buttonState;
+		}
+
+		prevReading = reading;
+	}
+
+private:
+	void changeBank()
+	{
+		*bankNumber += advanceDirection;
+		
+		// Range checking, make array loop around
+		if (*bankNumber < 0)
+			*bankNumber = 15;
+		if (*bankNumber > 15)
+			*bankNumber = 0;
+
+		Serial.write(0xC0);
+		Serial.write(bankArray[*bankNumber]);
+
+		digitalWrite(LED_PIN, HIGH);
+		delay(50);
+		digitalWrite(LED_PIN, LOW);
+	}
+
+};
+
+ButtonHandler leftButtonHandler(LEFT, &currentBank);
+ButtonHandler rightButtonHandler(RIGHT, &currentBank);
+
+void setup() 
+{
 	//  Set MIDI baud rate:
 	Serial.begin(31250);
 
 	// Set pin modes
-	pinMode(buttonBankLeft, INPUT);
-	pinMode(buttonBankRight, INPUT);
-	pinMode(ledPin, OUTPUT);
+	pinMode(BUTTON_BANK_LEFT, INPUT);
+	pinMode(BUTTON_BANK_RIGHT, INPUT);
+	pinMode(LED_PIN, OUTPUT);
 
 	// Populate array
 	for(int i = 0; i < 16; i++)
 		bankArray[i] = i*8;
 }
-}@gmai.com loop() {
-	bankLeftState = digitalRead(buttonBankLeft);
-	bankRightState = digitalRead(buttonBankRight);
-	
-	handleButtonChange(bankLeftState, prevBankLeftState, -1);
-	handleButtonChange(bankRightState, prevBankRightState, 1);
 
-	prevBankRightState = bankRightState;
-	prevBankLeftState = bankLeftState;
+void loop() 
+{
+	leftButtonHandler.updateState();
+	rightButtonHandler.updateState();
 }
-
-void handleButtonChange(int bankState, int prevBankState, int direction) {
-	if(buttonStateChanged(bankState, prevBankState)) {
-		if(direction == 1)
-			currentBank++;
-		else if(direction == -1)
-			currentBank--;
-		
-		// Range checking, make array loop around
-		if(currentBank < 0)
-			currentBank = 15;
-		if(currentBank > 15)
-			currentBank = 0;
-
-		Serial.write(0xC0);
-		Serial.write(bankArray[currentBank]);
-
-		digitalWrite(ledPin, HIGH);
-		delay(50);
-		digitalWrite(ledPin, LOW);
-	}
-}
-
-bool buttonStateChanged(int state, int pState) {
-	if(state == HIGH && pState == LOW)
-		return true;
-	else
-		return false;
-}
-
